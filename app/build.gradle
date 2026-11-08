@@ -1,0 +1,59 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.maddox.predtuner'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.maddox.predtuner'
+        // Wireless debugging (pairing code) needs Android 11+
+        minSdk 30
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // Fixed key so new builds install over old ones without uninstalling
+    signingConfigs {
+        release {
+            storeFile file('predtuner.keystore')
+            storePassword 'predtuner'
+            keyAlias 'predtuner'
+            keyPassword 'predtuner'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packagingOptions {
+        resources {
+            excludes += [
+                'META-INF/versions/9/OSGI-INF/MANIFEST.MF',
+                'META-INF/DEPENDENCIES',
+                'META-INF/LICENSE*',
+                'META-INF/NOTICE*'
+            ]
+        }
+    }
+}
+
+dependencies {
+    // On-device ADB client (pairing + TLS connection to the headset's own adbd)
+    implementation 'com.github.MuntashirAkon:libadb-android:3.1.1'
+    // TLS provider libadb needs for Android 11+ wireless debugging
+    implementation 'org.conscrypt:conscrypt-android:2.5.2'
+    // Makes the self-signed certificate used for pairing
+    implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
+}
