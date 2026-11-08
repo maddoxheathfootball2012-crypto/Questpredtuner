@@ -160,6 +160,7 @@ public class MainActivity extends Activity {
         actions.addView(button("Re-apply all now", v -> applyAllSaved()), weight(1));
         actions.addView(button("Scan Quest settings", v -> scan()), weight(1));
         col.addView(actions);
+        col.addView(button("Find hidden prediction settings", v -> findHidden()));
 
         // --- Scan results
         scanList = new LinearLayout(this);
@@ -394,7 +395,7 @@ public class MainActivity extends Activity {
                     }
                 }
                 Collections.sort(found, (a, b) -> a[0].compareTo(b[0]));
-                runOnUiThread(() -> showScan(found));
+                runOnUiThread(() -> showScan("Currently set on your Quest", found));
                 log("Found " + found.size() + " debug setting(s). Tap one to load it into a Custom row.");
             } catch (Throwable t) {
                 log("Scan failed: " + describe(t));
@@ -403,13 +404,52 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void showScan(List<String[]> found) {
+    /**
+     * Searches the Quest's system libraries and programs for setting names that mention
+     * prediction / extrapolation / latency. These can exist even when they're not set,
+     * so the normal Scan can't see them.
+     */
+    private void findHidden() {
+        if (!requireConnected()) return;
+        log("Searching system files for hidden settings… (can take up to a minute)");
+        String cmd = "{ find /system/lib64 /system/bin /vendor/lib64 /vendor/bin"
+                + " /system_ext/lib64 /system_ext/bin /product/lib64 -type f;"
+                + " find /system/priv-app /system_ext/priv-app /product/priv-app /system/app -name '*.so'; }"
+                + " 2>/dev/null | xargs grep -a -o -h -E"
+                + " '[a-z]+\\.[a-z0-9_]+\\.[A-Za-z0-9_.]*([Pp]redict|PREDICT|[Ee]xtrapolat|[Ll]atency)[A-Za-z0-9_.]*'"
+                + " 2>/dev/null | sort -u | head -300";
+        io.execute(() -> {
+            try {
+                AdbManager mgr = AdbManager.get(this);
+                String out = mgr.shell(cmd);
+                List<String[]> found = new ArrayList<>();
+                for (String line : out.split("\n")) {
+                    String name = line.trim();
+                    if (name.endsWith(".")) name = name.substring(0, name.length() - 1);
+                    if (!PROP_NAME.matcher(name).matches()) continue;
+                    // Only names the shell is normally allowed to change
+                    if (!name.startsWith("debug.") && !name.startsWith("vendor.debug.")) continue;
+                    String cur = mgr.shell("getprop " + name);
+                    found.add(new String[]{name, cur.isEmpty() ? "(not set)" : cur});
+                }
+                runOnUiThread(() -> showScan("Hidden prediction-related settings", found));
+                log(found.isEmpty()
+                        ? "No hidden prediction settings found in system files."
+                        : "Found " + found.size() + " hidden setting name(s). Tap one to load it, then try +/−.");
+            } catch (Throwable t) {
+                log("Search failed: " + describe(t));
+                markDisconnectedIfNeeded();
+            }
+        });
+    }
+
+    private void showScan(String title, List<String[]> found) {
         scanList.removeAllViews();
         if (found.isEmpty()) {
-            scanList.addView(text("No debug settings are set right now.", 14, false));
+            scanList.addView(text("Nothing found.", 14, false));
             return;
         }
-        scanList.addView(header("Currently set on your Quest"));
+        scanList.addView(header(title));
         for (String[] p : found) {
             Button b = button(p[0] + " = " + p[1], v -> loadIntoCustom(p[0], p[1]));
             b.setAllCaps(false);
@@ -428,7 +468,7 @@ public class MainActivity extends Activity {
         }
         if (target == null) target = controls.get(controls.size() - 2); // Custom 1
         target.propInput.setText(prop);
-        target.valueText.setText(value);
+        target.valueText.setText(NUMBER.matcher(value).matches() ? value : "—");
         prefs.edit().putString("prop_" + target.id, prop).apply();
         if (NUMBER.matcher(value).matches()) {
             prefs.edit().putString("val_" + target.id, value).apply();
